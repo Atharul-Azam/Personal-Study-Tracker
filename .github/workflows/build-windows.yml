@@ -1,0 +1,70 @@
+name: Build and verify Windows app
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Unit tests
+        run: npm test
+
+      - name: UI tests (headless Chromium)
+        run: |
+          npx playwright install chromium
+          npm run test:ui
+
+      - name: Smoke test, unpackaged (real Electron, real SQLite)
+        shell: pwsh
+        run: |
+          $electron = Join-Path $PWD 'node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path $electron)) { throw "missing $electron" }
+          $p = Start-Process $electron -ArgumentList '.','--smoke-test',"`"--smoke-out=$PWD\smoke-dev.json`"" -PassThru -Wait
+          Get-Content smoke-dev.json
+          if ($p.ExitCode -ne 0) { throw "unpackaged smoke test failed" }
+
+      - name: Build .exe (installer + portable)
+        run: npm run dist:win
+
+      - name: Smoke test the PACKAGED app
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'dist\win-unpacked\Study Tracker.exe'
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $p = Start-Process $exe -ArgumentList '--smoke-test',"`"--smoke-out=$PWD\smoke-packaged.json`"" -PassThru -Wait
+          Get-Content smoke-packaged.json
+          if ($p.ExitCode -ne 0) { throw "packaged smoke test failed" }
+
+      - name: Install with the NSIS installer (silent) and smoke test the installed app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $installed = Join-Path $env:LOCALAPPDATA 'Programs\Study Tracker\Study Tracker.exe'
+          if (-not (Test-Path $installed)) { throw "installer did not install to $installed" }
+          $menu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Study Tracker.lnk'
+          if (-not (Test-Path $menu)) { throw "Start Menu shortcut missing: $menu" }
+          $p = Start-Process $installed -ArgumentList '--smoke-test',"`"--smoke-out=$PWD\smoke-installed.json`"" -PassThru -Wait
+          Get-Content smoke-installed.json
+          if ($p.ExitCode -ne 0) { throw "installed-app smoke test failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StudyTracker-windows
+          path: |
+            dist/*-setup.exe
+            dist/*-portable.exe
+            smoke-*.json

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Study Tracker</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <button id="btn-sidebar" class="icon-btn" aria-label="Show settings panel" aria-controls="sidebar" aria-expanded="false" title="Settings (Ctrl+,)">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <div class="brand">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M8.5 15l2.2 2.2 4.3-4.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Study Tracker</span>
+      </div>
+      <nav class="nav" aria-label="Month navigation">
+        <button id="btn-prev" class="icon-btn" aria-label="Previous month" title="Previous month (Page Up)">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="btn-title" class="title-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="picker" title="Choose month and year">
+          <span id="title-text">—</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="btn-next" class="icon-btn" aria-label="Next month" title="Next month (Page Down)">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="btn-today" class="btn" title="Go to the current month (T)">Today</button>
+      </nav>
+      <div class="spacer"></div>
+      <div class="seg" role="group" aria-label="Calendar view" id="view-toggle">
+        <button type="button" data-view="grid" aria-pressed="true">Grid</button>
+        <button type="button" data-view="list" aria-pressed="false">List</button>
+      </div>
+    </header>
+
+    <div id="picker" class="popover" role="dialog" aria-label="Choose month and year" hidden></div>
+
+    <div class="workspace">
+      <aside id="sidebar" class="sidebar" aria-label="Settings" hidden></aside>
+      <main id="main" class="main">
+        <div id="summary" class="summary" aria-label="Monthly summary"></div>
+        <div id="calendar" class="calendar-wrap"></div>
+      </main>
+      <section id="editor" class="editor" aria-label="Study journal"></section>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+  <div id="modal-root"></div>
+
+  <script src="../shared/dates.js"></script>
+  <script src="../shared/model.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/calendar.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

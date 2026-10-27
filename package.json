@@ -1,0 +1,66 @@
+{
+  "name": "study-tracker",
+  "productName": "Study Tracker",
+  "version": "1.0.0",
+  "description": "Offline desktop study journal: every calendar date is its own learning log. No account, no cloud, no telemetry.",
+  "main": "src/main/main.js",
+  "author": "Study Tracker",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --no-warnings --test \"test/unit/*.test.js\"",
+    "test:ui": "node --no-warnings --test --test-timeout=240000 test/ui/ui.test.js",
+    "test:all": "npm test && npm run test:ui",
+    "smoke": "electron . --smoke-test",
+    "icons": "python scripts/make-icon.py",
+    "dist:dir": "electron-builder --win --x64 --dir --publish never",
+    "dist:win": "electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0",
+    "playwright": "^1.50.0"
+  },
+  "build": {
+    "appId": "com.studytracker.app",
+    "productName": "Study Tracker",
+    "copyright": "Study Tracker",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "package.json",
+      "src/**/*",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "electronLanguages": [
+      "en-US"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": [ "x64" ] },
+        { "target": "portable", "arch": [ "x64" ] }
+      ]
+    },
+    "nsis": {
+      "artifactName": "StudyTracker-${version}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Study Tracker",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "StudyTracker-${version}-portable.${ext}"
+    }
+  }
+}
