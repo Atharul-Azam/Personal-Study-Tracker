@@ -344,7 +344,14 @@
     el.sidebar = $('sidebar'); el.sidebarBtn = $('btn-sidebar'); el.title = $('title-text'); el.titleBtn = $('btn-title');
     el.picker = $('picker'); el.viewToggle = $('view-toggle'); el.calendar = $('calendar'); el.summary = $('summary'); el.editor = $('editor');
 
-    return Promise.all([ST.rpc('getSettings'), ST.rpc('getInfo')]).then(function (r) {
+    // Start inside a promise chain so that ANY failure (including a missing preload bridge, which
+    // makes ST.rpc throw synchronously) ends in the error handler below and settles __appReady.
+    return Promise.resolve().then(function () {
+      if (!window.api || typeof window.api.rpc !== 'function') {
+        throw new Error('The connection to the application core is missing (the preload script did not load). Please reinstall Study Tracker.');
+      }
+      return Promise.all([ST.rpc('getSettings'), ST.rpc('getInfo')]);
+    }).then(function (r) {
       state.settings = r[0]; state.info = r[1];
       var t = D.todayParts();
       state.year = t.year; state.month = t.month;
@@ -371,7 +378,7 @@
     }).then(function () {
       resolveReady(true);
     }, function (err) {
-      fatal(err && err.message ? err.message : 'Unknown error.');
+      try { fatal(err && err.message ? err.message : 'Unknown error.'); } catch (_) { /* never leave __appReady pending */ }
       resolveReady(false);
     });
   }

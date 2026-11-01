@@ -929,3 +929,36 @@ test('data survives many restarts and ordinary navigation (end-to-end soak)', as
   expectClean(app);
   await app.finish();
 });
+
+// ----------------------------------------------------------------------------- 9. start-up failures never hang
+test('start-up never hangs: with no preload bridge, or a bridge that fails, __appReady settles to false and a clear message is shown', async () => {
+  const h = await startHarness();
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+  try {
+    // (a) the preload bridge is missing altogether (window.api undefined)
+    const a = await ctx.newPage();
+    await a.goto(h.url);
+    const readyA = await Promise.race([a.evaluate(() => window.__appReady), new Promise((r) => setTimeout(() => r('HUNG'), 5000))]);
+    assert.equal(readyA, false, 'no bridge → __appReady resolves false (does not hang)');
+    const textA = await a.textContent('#calendar');
+    assert.match(textA, /could not start/i);
+    assert.match(textA, /preload/i);
+
+    // (b) the bridge exists but every call fails
+    const b = await ctx.newPage();
+    await b.addInitScript(`window.api = { rpc: () => Promise.reject(new Error('boom')), onCloseRequested() {}, respondToClose() {} };`);
+    await b.goto(h.url);
+    const readyB = await Promise.race([b.evaluate(() => window.__appReady), new Promise((r) => setTimeout(() => r('HUNG'), 5000))]);
+    assert.equal(readyB, false);
+    assert.match(await b.textContent('#calendar'), /could not start/i);
+
+    // (c) the bridge throws synchronously
+    const c = await ctx.newPage();
+    await c.addInitScript(`window.api = { rpc: () => { throw new Error('sync boom'); } };`);
+    await c.goto(h.url);
+    const readyC = await Promise.race([c.evaluate(() => window.__appReady), new Promise((r) => setTimeout(() => r('HUNG'), 5000))]);
+    assert.equal(readyC, false);
+  } finally {
+    await ctx.close().catch(() => {}); await h.close().catch(() => {});
+  }
+});

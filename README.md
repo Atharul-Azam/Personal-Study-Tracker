@@ -39,6 +39,7 @@ src/
     store.js     data access (transactions, month summaries, statistics, restore)
     db.js        SQLite open + integrity check + versioned migrations
     backup.js    JSON export / strict import validation / CSV export
+    smoke.js     the --smoke-test checks + self-explaining JSON report (Electron-free, unit-tested)
   shared/      Pure logic used by both sides
     dates.js     calendar math (leap years, weekday alignment, month grid/list)
     model.js     entry + settings validation, "study day" rule
@@ -47,7 +48,7 @@ src/
 test/
   unit/        dates, store, backup/restore, main-process (against a fake Electron)
   ui/          end-to-end tests: the real UI + real SQLite in headless Chromium
-scripts/       build-windows.ps1, make-icon.py
+scripts/       build-windows.ps1, smoke.ps1 (runs + reports a smoke test), make-icon.py
 .github/workflows/build-windows.yml   builds + smoke-tests the .exe on Windows
 ```
 
@@ -70,6 +71,8 @@ npm run smoke       # launches the REAL Electron app headlessly and checks it (s
 ```
 
 `npm run smoke` / `Study Tracker.exe --smoke-test --smoke-out=result.json` starts the app with a throw-away data folder and checks: the window opens, the calendar shows exactly the current month's days with no adjacent-month dates, a journal entry can be saved, **all network requests are blocked**, the entry survives a reload, and the data is really in the SQLite file on disk. It writes a JSON report and exits 0 only if every check passes.
+
+The report is written from the first moment and rewritten at every step, so even a hang or crash leaves an explanation: the `stage` it reached, a `log` (renderer console output, preload / page-load errors, renderer crashes), the `checks`, and a `snapshot` of the page on failure. Every wait has its own timeout and a 60 s watchdog ends the run (exit code 2) with the report. `scripts\smoke.ps1 -Exe <exe> -Out <report.json>` wraps a run for CI: it prints the report *before* deciding pass/fail and kills the app if it hangs. If a smoke test fails on your PC or in CI, the report (`smoke-*.json`, also uploaded as a CI artifact) is the thing to look at.
 
 ## Build the Windows app
 

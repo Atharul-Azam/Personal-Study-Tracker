@@ -21,6 +21,8 @@ const SMOKE_OUT = smokeOutArg ? smokeOutArg.slice('--smoke-out='.length) : null;
 // Windows: %APPDATA%\Study Tracker
 if (SMOKE) {
   app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'study-tracker-smoke-')));
+  // Headless CI runners have no usable GPU; software rendering avoids GPU-process stalls there.
+  if (typeof app.disableHardwareAcceleration === 'function') app.disableHardwareAcceleration();
 } else {
   app.setPath('userData', path.join(app.getPath('appData'), 'Study Tracker'));
 }
@@ -29,6 +31,7 @@ const { createStore } = require('./store.js');
 const { createService } = require('./service.js');
 const { DatabaseInitError } = require('./db.js');
 const Dates = require('../shared/dates.js');
+const Smoke = require('./smoke.js');
 
 let store = null;
 let service = null;
@@ -159,7 +162,8 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       devTools: !app.isPackaged,
-      spellcheck: false
+      spellcheck: false,
+      backgroundThrottling: !SMOKE
     }
   });
 
@@ -183,64 +187,67 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// --smoke-test: launched by CI against the real packaged .exe.
+// --smoke-test: launched by CI against the real unpackaged / packaged / installed app.
+// The report file is written from the very first moment and at every step, so a hang or crash
+// still leaves an explanation behind (see smoke.js).
 // ---------------------------------------------------------------------------
-async function runSmokeTest() {
-  const result = { ok: false, checks: [], userData: app.getPath('userData'), electron: process.versions.electron, node: process.versions.node, platform: process.platform };
-  const check = (name, pass, detail) => result.checks.push({ name, pass: !!pass, detail: detail === undefined ? null : detail });
-  const wc = mainWindow.webContents;
-  const waitLoad = () => new Promise((resolve) => wc.once('did-finish-load', resolve));
-  const evalJs = (code) => wc.executeJavaScript(code, true);
-  try {
-    if (wc.isLoading()) await waitLoad();
-    await evalJs('window.__appReady');
-    await new Promise((r) => setTimeout(r, 300));
+let smokeReport = null;
+let smokeExited = false;
 
-    const now = Dates.todayParts();
-    const expectedDays = Dates.daysInMonth(now.year, now.month);
-    const ui = await evalJs(`(() => {
-      const cells = [...document.querySelectorAll('.day[data-date]')];
-      const prefix = ${JSON.stringify(Dates.monthKey(now.year, now.month) + '-')};
-      return { days: cells.length, allInMonth: cells.every((c) => c.dataset.date.startsWith(prefix)),
-               title: document.getElementById('title-text') && document.getElementById('title-text').textContent,
-               hasApi: typeof window.api === 'object' };
-    })()`);
-    check('window opens with preload API', ui.hasApi);
-    check('calendar shows current month title', ui.title === Dates.MONTH_NAMES[now.month - 1] + ' ' + now.year, ui.title);
-    check('calendar shows exactly the days of this month', ui.days === expectedDays, ui.days + ' of ' + expectedDays);
-    check('no dates from adjacent months', ui.allInMonth);
-
-    const today = Dates.todayISO();
-    const save = await evalJs(`window.api.rpc('saveEntry', [{ date: ${JSON.stringify(today)}, points: [{ text: 'smoke test ✓ বাংলা' }], review: 'persisted', status: 'in_progress', durationMin: 5 }])`);
-    check('saving a journal entry works', save && save.ok, save && save.message);
-
-    const net = await evalJs(`fetch('https://example.com/', { mode: 'no-cors' }).then(() => 'REACHED', () => 'BLOCKED')`);
-    check('network requests are blocked (offline-only)', net === 'BLOCKED', net);
-
-    const reloaded = waitLoad();
-    wc.reload();
-    await reloaded;
-    await evalJs('window.__appReady');
-    await new Promise((r) => setTimeout(r, 300));
-    const after = await evalJs(`(() => { const t = document.querySelector('.day.today'); return { hasNotes: !!(t && t.classList.contains('has-notes')), text: document.querySelector('#editor') ? document.querySelector('#editor').innerText : '' }; })()`);
-    check('entry still shown after reload', after.hasNotes);
-    check('journal editor restores saved text', /smoke test ✓ বাংলা/.test(after.text) || (await evalJs(`[...document.querySelectorAll('.point-text')].map(t => t.value).join('|')`)).includes('smoke test ✓ বাংলা'));
-
-    // Prove it hit the disk: close the store and read the file back with a fresh connection.
-    store.close();
-    const reopened = createStore(dbFile());
-    const back = reopened.getEntry(today);
-    reopened.close();
-    check('data is on disk in the per-user folder', back.points.length === 1 && back.review === 'persisted' && dbFile().startsWith(app.getPath('userData')), dbFile());
-    result.ok = result.checks.every((c) => c.pass);
-  } catch (err) {
-    check('smoke test ran without exceptions', false, String(err && err.stack || err));
+function smokeExit(code) {
+  if (smokeExited) return;
+  smokeExited = true;
+  if (smokeReport) {
+    smokeReport.finish(code === 0);
+    console.log(JSON.stringify(smokeReport.result, null, 2));
   }
-  const json = JSON.stringify(result, null, 2);
-  if (SMOKE_OUT) { try { fs.writeFileSync(SMOKE_OUT, json); } catch (_) { /* ignore */ } }
-  console.log(json);
   allowClose = true;
-  app.exit(result.ok ? 0 : 1);
+  app.exit(code);
+}
+
+function startSmokeReport() {
+  smokeReport = Smoke.createReport(SMOKE_OUT, {
+    userData: app.getPath('userData'),
+    electron: process.versions.electron,
+    node: process.versions.node,
+    chrome: process.versions.chrome,
+    platform: process.platform,
+    arch: process.arch,
+    packaged: !!app.isPackaged,
+    argv: process.argv.slice(1)
+  });
+  smokeReport.stage('main process started');
+  process.on('uncaughtException', (err) => {
+    smokeReport.check('no uncaught exception in the main process', false, String(err && err.stack || err));
+    smokeExit(1);
+  });
+  process.on('unhandledRejection', (err) => { smokeReport.log('unhandledRejection: ' + String(err && err.stack || err)); });
+  if (typeof app.on === 'function') {
+    app.on('child-process-gone', (_e, details) => smokeReport.log('child-process-gone: ' + JSON.stringify(details)));
+  }
+  // Watchdog: independent of everything else. Whatever stage we are stuck in is in the report.
+  const limit = Number(process.env.STUDY_TRACKER_SMOKE_TIMEOUT_MS) || 60000;
+  setTimeout(() => {
+    smokeReport.check('finished within ' + Math.round(limit / 1000) + ' s (stuck at stage "' + smokeReport.result.stage + '")', false);
+    smokeExit(2);
+  }, limit);
+}
+
+function watchWindowForSmoke(win) {
+  const wc = win.webContents;
+  wc.on('console-message', (e, level, message, line, source) => {
+    const text = typeof message === 'string' ? message : (e && e.message);   // Electron 35+ passes one details object
+    const lvl = typeof message === 'string' ? level : (e && e.level);
+    const src = typeof message === 'string' ? source : (e && e.sourceId);
+    const ln = typeof message === 'string' ? line : (e && e.lineNumber);
+    smokeReport.log('renderer console [' + lvl + '] ' + text + (src ? ' (' + path.basename(String(src)) + ':' + ln + ')' : ''));
+  });
+  wc.on('preload-error', (_e, preloadPath, error) => smokeReport.log('PRELOAD ERROR in ' + preloadPath + ': ' + String(error && error.stack || error)));
+  wc.on('did-fail-load', (_e, code, desc, url) => smokeReport.log('did-fail-load ' + code + ' ' + desc + ' ' + url));
+  wc.on('render-process-gone', (_e, details) => { smokeReport.log('RENDERER PROCESS GONE: ' + JSON.stringify(details)); });
+  wc.on('unresponsive', () => smokeReport.log('renderer is unresponsive'));
+  wc.on('dom-ready', () => smokeReport.log('dom-ready'));
+  wc.on('did-finish-load', () => smokeReport.log('did-finish-load'));
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +255,8 @@ async function runSmokeTest() {
 if (!SMOKE && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  if (SMOKE) startSmokeReport();
+
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -256,12 +265,18 @@ if (!SMOKE && !app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    if (SMOKE) smokeReport.stage('electron ready');
     Menu.setApplicationMenu(null);
     hardenSession();
     try {
       store = createStore(dbFile());
     } catch (err) {
       const message = err instanceof DatabaseInitError ? err.message : 'Study Tracker could not start. ' + String(err && err.message);
+      if (SMOKE) {
+        smokeReport.check('database opens', false, message + (err && err.stack ? '\n' + err.stack : ''));
+        smokeExit(1);
+        return;
+      }
       dialog.showErrorBox('Study Tracker could not open your data', message);
       app.exit(1);
       return;
@@ -270,9 +285,24 @@ if (!SMOKE && !app.requestSingleInstanceLock()) {
     registerIpc();
     createWindow();
     if (SMOKE) {
-      mainWindow.webContents.once('did-finish-load', () => { runSmokeTest(); });
-      setTimeout(() => { console.log('SMOKE TEST TIMEOUT'); app.exit(2); }, 60000).unref();
+      watchWindowForSmoke(mainWindow);
+      smokeReport.stage('window created');
+      Smoke.run({
+        wc: mainWindow.webContents,
+        report: smokeReport,
+        Dates,
+        userData: app.getPath('userData'),
+        dbFile: dbFile(),
+        closeStore: () => store.close(),
+        openStore: () => createStore(dbFile())
+      }).then((ok) => smokeExit(ok ? 0 : 1), (err) => {
+        smokeReport.check('smoke runner crashed', false, String(err && err.stack || err));
+        smokeExit(1);
+      });
     }
+  }).catch((err) => {
+    if (SMOKE) { smokeReport.check('start-up threw', false, String(err && err.stack || err)); smokeExit(1); }
+    else { dialog.showErrorBox('Study Tracker could not start', String(err && err.message)); app.exit(1); }
   });
 
   app.on('window-all-closed', () => {
